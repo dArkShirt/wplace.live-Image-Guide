@@ -2,10 +2,10 @@
 Um script para o ViolentMonkey que exibe uma imagem de referência sobre o canvas do wplace.live com controles avançados de posicionamento e visualização. Ideal para ajudar na criação de artes pixeladas com precisão!
 
 // ==UserScript==
-// @name         wplace.live Image Guide
+// @name         wplace.live Guia Visual Avançado
 // @namespace    ViolentMonkey
-// @version      3.1
-// @description  Mostrador de imagem com ajustes de posição e visualização
+// @version      3.0
+// @description  Ferramenta completa para sobrepor imagens no wplace.live com controles avançados
 // @author       Você
 // @match        https://wplace.live/*
 // @grant        GM_addStyle
@@ -17,358 +17,623 @@ Um script para o ViolentMonkey que exibe uma imagem de referência sobre o canva
 (function() {
     'use strict';
 
-    // CONFIGURAÇÃO (COLE SEU BASE64 AQUI)
-    const defaultConfig = {
-        base64Image: 'data:image/png;base64,COLE_SEU_BASE64_AQUI',
-        referenceOpacity: 0.6,
-        showReference: true,
-        offset: { x: 0, y: 0 },
-        uiMinimized: false,
-        windowPosition: { x: null, y: null },
-        pixelSize: 1
+    // =============================================
+    // CONFIGURAÇÕES E CONSTANTES
+    // =============================================
+    const DIMENSOES = {
+        PAINEL: {
+            NORMAL: { width: 320, height: 'auto' },
+            MINIMIZADO: { width: 150, height: 40 }
+        },
+        MARGENS: {
+            PADRAO: 20,
+            MINIMA: 10
+        },
+        OPACIDADE: {
+            MIN: 0.1,
+            MAX: 1,
+            STEP: 0.1
+        },
+        TAMANHO: {
+            MIN: 20,
+            MAX: 200,
+            STEP: 10
+        }
     };
 
-    // Carrega configurações salvas
-    let config = { ...defaultConfig, ...GM_getValue('wplaceConfig', {}) };
+    const config = {
+        urlImagem: '',
+        opacidade: 0.6,
+        deslocamento: { x: 0, y: 0 },
+        tamanho: 100,
+        janelaMinimizada: false,
+        posicaoJanela: { x: null, y: null }
+    };
 
-    // ESTILOS GLOBAIS
+    // =============================================
+    // ELEMENTOS DA INTERFACE
+    // =============================================
+    const elementos = {
+        guia: null,
+        controles: null,
+        urlInput: null,
+        carregarBtn: null,
+        status: null,
+        opacidade: null,
+        tamanhoValor: null,
+        diminuirBtn: null,
+        aumentarBtn: null,
+        tamanhoSlider: null,
+        minimizarBtn: null,
+        dragHandle: null
+    };
+
+    // =============================================
+    // ESTILOS CSS
+    // =============================================
     GM_addStyle(`
-        #wplace-helper-ui {
-            position: fixed;
-            bottom: ${config.windowPosition.y !== null ? config.windowPosition.y + 'px' : '20px'};
-            right: ${config.windowPosition.x !== null ? config.windowPosition.x + 'px' : '20px'};
-            z-index: 9999;
-            background: rgba(0,0,0,0.95);
-            color: white;
-            border-radius: 8px;
-            font-family: Arial;
-            width: 320px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.8);
-            transition: all 0.3s ease;
-            border: 1px solid #444;
-            overflow: hidden;
-        }
-        
-        #wplace-helper-ui.minimized {
-            width: 40px;
-            height: 40px;
-        }
-        
-        #wplace-header {
-            padding: 10px 15px;
-            background: rgba(0,0,0,0.7);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: move;
-            user-select: none;
-        }
-        
-        #wplace-title {
-            font-weight: bold;
-            color: #4CAF50;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        #wplace-window-controls {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .wplace-window-btn {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            padding: 0;
-        }
-        
-        #wplace-minimize-btn {
-            background: #FF9800;
-            color: white;
-        }
-        
-        #wplace-close-btn {
-            background: #f44336;
-            color: white;
-        }
-        
-        #wplace-content {
-            padding: 15px;
-            display: ${config.uiMinimized ? 'none' : 'block'};
-        }
-        
-        #wplace-reference-overlay {
+        #wplace-guia {
             position: absolute;
             pointer-events: none;
             z-index: 9998;
-            opacity: ${config.referenceOpacity};
+            opacity: ${config.opacidade};
             image-rendering: pixelated;
             border: 2px dashed rgba(255,255,255,0.3);
+            display: ${config.urlImagem ? 'block' : 'none'};
+            transform-origin: top left;
+            will-change: transform;
         }
-        
-        .control-group {
+
+        #wplace-controles {
+            position: fixed;
+            z-index: 9999;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 15px;
+            padding-top: 35px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            box-shadow: 0 0 15px rgba(0,0,0,0.7);
+            user-select: none;
+            will-change: transform;
+            transition: all 0.2s ease;
+            width: ${DIMENSOES.PAINEL.NORMAL.width}px;
+        }
+
+        #wplace-controles.minimizado {
+            height: ${DIMENSOES.PAINEL.MINIMIZADO.height}px;
+            width: ${DIMENSOES.PAINEL.MINIMIZADO.width}px;
+            padding-top: 15px;
+            overflow: hidden;
+        }
+
+        #wplace-controles.minimizado .conteudo-controles {
+            display: none;
+        }
+
+        #wplace-drag-handle {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 30px;
+            cursor: move;
+            touch-action: none;
+        }
+
+        #wplace-minimizar-btn {
+            position: absolute;
+            top: 35px;
+            right: 5px;
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 5px;
+            z-index: 10000;
+        }
+
+        #wplace-controles.minimizado #wplace-minimizar-btn {
+            top: 5px;
+            position: static;
+            margin: 0 auto;
+            display: block;
+        }
+
+        .grupo-controle {
             margin-bottom: 12px;
         }
-        
-        .control-title {
-            font-weight: bold;
-            margin-bottom: 6px;
-            display: block;
+
+        #wplace-url-input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+        }
+
+        #wplace-carregar-btn {
+            width: 100%;
+            padding: 8px;
+            background: #4CAF50;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: background 0.2s;
+        }
+
+        #wplace-carregar-btn:hover {
+            background: #45a049;
+        }
+
+        #wplace-carregar-btn.carregando {
+            background: #367c39;
+        }
+
+        #wplace-status {
+            margin-top: 10px;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .controle-tamanho {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .botao-tamanho {
+            width: 30px;
+            height: 30px;
+            background: #555;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .botao-tamanho:hover {
+            background: #666;
+        }
+
+        #wplace-tamanho-valor {
+            min-width: 40px;
+            text-align: center;
+        }
+
+        #wplace-controles.dragging {
+            cursor: grabbing;
+            transition: none;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 5px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     `);
 
-    // VARIÁVEIS DO SISTEMA
-    let overlay = null;
-    let referenceImage = null;
+    // =============================================
+    // FUNÇÕES PRINCIPAIS
+    // =============================================
 
-    // ELEMENTOS DA INTERFACE
-    const createUI = () => {
-        const ui = $(`
-            <div id="wplace-helper-ui" class="${config.uiMinimized ? 'minimized' : ''}">
-                <div id="wplace-header">
-                    <div id="wplace-title">wplace Image Guide</div>
-                    <div id="wplace-window-controls">
-                        <button id="wplace-minimize-btn" class="wplace-window-btn">
-                            ${config.uiMinimized ? '+' : '-'}
-                        </button>
-                        <button id="wplace-close-btn" class="wplace-window-btn">×</button>
+    /**
+     * Cria todos os elementos da interface
+     */
+    function criarInterface() {
+        elementos.controles = $(`
+            <div id="wplace-controles" class="${config.janelaMinimizada ? 'minimizado' : ''}">
+                <div id="wplace-drag-handle"></div>
+                <button id="wplace-minimizar-btn">${config.janelaMinimizada ? '⬛' : '➖'}</button>
+                <div class="conteudo-controles">
+                    <div class="grupo-controle">
+                        <label>URL da Imagem:</label>
+                        <input type="text" id="wplace-url-input" placeholder="https://exemplo.com/imagem.png" value="${config.urlImagem}">
+                        <button id="wplace-carregar-btn">Carregar Imagem</button>
+                        <div id="wplace-status">${config.urlImagem ? 'Imagem pronta' : 'Nenhuma imagem carregada'}</div>
                     </div>
-                </div>
-                <div id="wplace-content">
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-                        <div>
-                            <label class="control-title">Opacidade:</label>
-                            <input type="range" id="wplace-opacity" min="10" max="90" value="${config.referenceOpacity * 100}" style="width:100%;">
-                        </div>
-                        <div>
-                            <label class="control-title">Tamanho Pixel:</label>
-                            <select id="wplace-pixel-size" style="width:100%;padding:5px;">
-                                ${[1, 2, 3].map(size => `
-                                    <option value="${size}" ${size === config.pixelSize ? 'selected' : ''}>${size}x${size}</option>
-                                `).join('')}
-                            </select>
-                        </div>
+
+                    <div class="grupo-controle">
+                        <label>Opacidade: ${config.opacidade.toFixed(1)}</label>
+                        <input type="range" id="wplace-opacidade" min="${DIMENSOES.OPACIDADE.MIN}" max="${DIMENSOES.OPACIDADE.MAX}" step="${DIMENSOES.OPACIDADE.STEP}" value="${config.opacidade}">
                     </div>
-                    
-                    <div class="control-group" style="margin-bottom:12px;">
-                        <label class="control-title">Ajuste de Posição:</label>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                            <div>
-                                <label style="font-size:12px;">Horizontal (X):</label>
-                                <div style="display:flex;gap:5px;">
-                                    <button class="pos-adjust" data-axis="x" data-dir="-1" style="flex:1;padding:5px;">←</button>
-                                    <button class="pos-adjust" data-axis="x" data-dir="1" style="flex:1;padding:5px;">→</button>
-                                </div>
-                            </div>
-                            <div>
-                                <label style="font-size:12px;">Vertical (Y):</label>
-                                <div style="display:flex;gap:5px;">
-                                    <button class="pos-adjust" data-axis="y" data-dir="-1" style="flex:1;padding:5px;">↑</button>
-                                    <button class="pos-adjust" data-axis="y" data-dir="1" style="flex:1;padding:5px;">↓</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="margin-top:6px;font-size:12px;text-align:center;">
-                            Posição atual: X ${config.offset.x}px | Y ${config.offset.y}px
+
+                    <div class="grupo-controle">
+                        <label>Tamanho da Imagem:</label>
+                        <div class="controle-tamanho">
+                            <button class="botao-tamanho" id="wplace-diminuir">-</button>
+                            <span id="wplace-tamanho-valor">${config.tamanho}%</span>
+                            <button class="botao-tamanho" id="wplace-aumentar">+</button>
+                            <input type="range" id="wplace-tamanho-slider" min="${DIMENSOES.TAMANHO.MIN}" max="${DIMENSOES.TAMANHO.MAX}" value="${config.tamanho}" style="flex-grow:1;">
                         </div>
                     </div>
-                    
-                    <div style="font-size:11px;color:#aaa;text-align:center;">
-                        Pressione <strong>Ctrl+Shift+Arrow Keys</strong> para ajustar posição
+
+                    <div class="grupo-controle">
+                        <label>Posição Atual:</label>
+                        <div>X: ${config.deslocamento.x}px, Y: ${config.deslocamento.y}px</div>
                     </div>
                 </div>
             </div>
         `);
 
-        $('body').append(ui);
-        
-        // Configura arrastar a janela
-        let isDragging = false;
-        let offsetX, offsetY;
-        
-        $('#wplace-header').mousedown(function(e) {
-            if (e.target.id !== 'wplace-header' && !$(e.target).closest('#wplace-header').length) return;
-            
-            isDragging = true;
-            offsetX = e.clientX - ui[0].getBoundingClientRect().left;
-            offsetY = e.clientY - ui[0].getBoundingClientRect().top;
-            ui.css('z-index', '10000');
-        });
-        
-        $(document).mousemove(function(e) {
-            if (!isDragging) return;
-            
-            const x = e.clientX - offsetX;
-            const y = e.clientY - offsetY;
-            
-            ui.css({
-                left: x + 'px',
-                top: y + 'px',
-                right: 'auto',
-                bottom: 'auto'
-            });
-            
-            config.windowPosition = { x, y };
-        }).mouseup(function() {
-            isDragging = false;
-            GM_setValue('wplaceConfig', config);
-        });
-        
-        return ui;
-    };
+        elementos.guia = $(`<img id="wplace-guia" src="${config.urlImagem}" alt="Guia visual">`);
 
-    // FUNÇÕES DE CONTROLE DA JANELA
-    const toggleMinimize = () => {
-        config.uiMinimized = !config.uiMinimized;
-        GM_setValue('wplaceConfig', config);
-        
-        const ui = $('#wplace-helper-ui');
-        const content = $('#wplace-content');
-        const btn = $('#wplace-minimize-btn');
-        
-        if (config.uiMinimized) {
-            ui.addClass('minimized');
-            content.hide();
-            btn.text('+');
-        } else {
-            ui.removeClass('minimized');
-            content.show();
-            btn.text('-');
+        $('body').append(elementos.guia, elementos.controles);
+
+        // Cache de elementos
+        elementos.urlInput = $('#wplace-url-input');
+        elementos.carregarBtn = $('#wplace-carregar-btn');
+        elementos.status = $('#wplace-status');
+        elementos.opacidade = $('#wplace-opacidade');
+        elementos.tamanhoValor = $('#wplace-tamanho-valor');
+        elementos.diminuirBtn = $('#wplace-diminuir');
+        elementos.aumentarBtn = $('#wplace-aumentar');
+        elementos.tamanhoSlider = $('#wplace-tamanho-slider');
+        elementos.minimizarBtn = $('#wplace-minimizar-btn');
+        elementos.dragHandle = $('#wplace-drag-handle');
+    }
+
+    /**
+     * Ajusta a posição da janela para ficar visível
+     * @param {HTMLElement} element - Elemento do painel de controles
+     */
+    function ajustarPosicaoJanela(element) {
+        if (config.janelaMinimizada) {
+            // Posiciona no canto inferior direito quando minimizado
+            element.style.left = 'auto';
+            element.style.right = DIMENSOES.MARGENS.PADRAO + 'px';
+            element.style.top = 'auto';
+            element.style.bottom = DIMENSOES.MARGENS.PADRAO + 'px';
+            return;
         }
-    };
 
-    const closeWindow = () => {
-        $('#wplace-helper-ui').remove();
-        $('#wplace-reference-overlay').remove();
-    };
+        const width = DIMENSOES.PAINEL.NORMAL.width;
+        const height = element.offsetHeight;
 
-    // CARREGA IMAGEM DE REFERÊNCIA
-    const loadReferenceImage = () => {
-        if (!config.showReference) return;
+        // Verifica se a posição está fora da tela
+        if (config.posicaoJanela.x === null ||
+            config.posicaoJanela.x > window.innerWidth - DIMENSOES.MARGENS.MINIMA ||
+            config.posicaoJanela.x < -width + DIMENSOES.MARGENS.MINIMA) {
+            config.posicaoJanela.x = window.innerWidth - width - DIMENSOES.MARGENS.PADRAO;
+        }
+
+        if (config.posicaoJanela.y === null ||
+            config.posicaoJanela.y > window.innerHeight - DIMENSOES.MARGENS.MINIMA ||
+            config.posicaoJanela.y < -height + DIMENSOES.MARGENS.MINIMA) {
+            config.posicaoJanela.y = window.innerHeight - height - DIMENSOES.MARGENS.PADRAO;
+        }
+
+        // Aplica a posição ajustada
+        element.style.left = `${Math.max(DIMENSOES.MARGENS.MINIMA, Math.min(config.posicaoJanela.x, window.innerWidth - width - DIMENSOES.MARGENS.MINIMA))}px`;
+        element.style.top = `${Math.max(DIMENSOES.MARGENS.MINIMA, Math.min(config.posicaoJanela.y, window.innerHeight - height - DIMENSOES.MARGENS.MINIMA))}px`;
+        element.style.right = 'auto';
+        element.style.bottom = 'auto';
+    }
+
+    /**
+     * Torna a janela arrastável
+     * @param {HTMLElement} element - Elemento do painel de controles
+     */
+    function makeDraggable(element) {
+        let isDragging = false;
+        let startX, startY, startLeft, startTop;
+
+        const dragMouseDown = (e) => {
+            if (e.target !== elementos.dragHandle[0] || config.janelaMinimizada) return;
+
+            e.preventDefault();
+            isDragging = true;
+
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = element.offsetLeft;
+            startTop = element.offsetTop;
+
+            element.classList.add('dragging');
+            document.addEventListener('mousemove', elementDrag);
+            document.addEventListener('mouseup', closeDragElement);
+        };
+
+        const elementDrag = (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+
+            const newLeft = startLeft + (e.clientX - startX);
+            const newTop = startTop + (e.clientY - startY);
+
+            const maxTop = window.innerHeight - (config.janelaMinimizada ? DIMENSOES.PAINEL.MINIMIZADO.height : element.offsetHeight);
+            const maxLeft = window.innerWidth - (config.janelaMinimizada ? DIMENSOES.PAINEL.MINIMIZADO.width : element.offsetWidth);
+
+            element.style.left = `${Math.min(Math.max(newLeft, DIMENSOES.MARGENS.MINIMA), maxLeft - DIMENSOES.MARGENS.MINIMA)}px`;
+            element.style.top = `${Math.min(Math.max(newTop, DIMENSOES.MARGENS.MINIMA), maxTop - DIMENSOES.MARGENS.MINIMA)}px`;
+
+            element.style.right = 'auto';
+            element.style.bottom = 'auto';
+
+            config.posicaoJanela = {
+                x: parseInt(element.style.left),
+                y: parseInt(element.style.top)
+            };
+        };
+
+        const closeDragElement = () => {
+            isDragging = false;
+            element.classList.remove('dragging');
+            salvarConfiguracao();
+            document.removeEventListener('mousemove', elementDrag);
+            document.removeEventListener('mouseup', closeDragElement);
+        };
+
+        elementos.dragHandle.on('mousedown', dragMouseDown);
+    }
+
+    /**
+     * Carrega a imagem da URL
+     * @param {string} url - URL da imagem a ser carregada
+     * @returns {boolean} Retorna true se o carregamento foi iniciado com sucesso
+     */
+    function carregarImagem(url) {
+        if (!validarURL(url)) {
+            elementos.status.html('<span style="color:#ff6b6b">URL inválida. Use links que terminem com .png, .jpg, .jpeg, .gif ou .webp</span>');
+            return false;
+        }
+
+        mostrarCarregamento(true);
+        elementos.status.text('Carregando imagem...');
 
         const img = new Image();
+        img.crossOrigin = "Anonymous";
+
         img.onload = function() {
-            referenceImage = {
-                width: this.width,
-                height: this.height
-            };
-            createOverlay();
-            updateOverlayPosition();
+            config.urlImagem = url;
+            elementos.guia.attr('src', url).show();
+            elementos.status.text('Imagem carregada com sucesso!');
+            mostrarCarregamento(false);
+            atualizarTamanho();
+            atualizarPosicao();
+            salvarConfiguracao();
         };
-        img.onerror = () => {
-            console.error('Erro ao carregar imagem de referência');
+
+        img.onerror = function() {
+            elementos.status.html(`
+                <span style="color:#ff6b6b">Falha ao carregar imagem</span>
+                <div style="font-size:12px;color:#aaa;margin-top:5px;">
+                    Dica: Use links diretos de serviços como Imgur (ex: https://i.imgur.com/abc123.png)
+                </div>
+            `);
+            mostrarCarregamento(false);
         };
-        img.src = config.base64Image;
-    };
 
-    // CRIA OVERLAY DA IMAGEM
-    const createOverlay = () => {
-        if (overlay) overlay.remove();
-        
-        overlay = $(`
-            <img id="wplace-reference-overlay" 
-                 src="${config.base64Image}" 
-                 style="opacity: ${config.referenceOpacity};">
-        `);
-        $('body').append(overlay);
-        updateOverlayPosition();
-    };
+        img.src = url;
+        return true;
+    }
 
-    // ATUALIZA POSIÇÃO DO OVERLAY
-    const updateOverlayPosition = () => {
-        if (!overlay || !referenceImage) return;
-        
+    /**
+     * Valida a URL da imagem
+     * @param {string} url - URL a ser validada
+     * @returns {boolean} Retorna true se a URL é válida
+     */
+    function validarURL(url) {
+        return /\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(url);
+    }
+
+    /**
+     * Mostra/oculta o indicador de carregamento
+     * @param {boolean} mostrar - Se true, mostra o indicador
+     */
+    function mostrarCarregamento(mostrar) {
+        elementos.carregarBtn.toggleClass('carregando', mostrar)
+            .html(mostrar ? '<span class="loader"></span> Carregando...' : 'Carregar Imagem');
+    }
+
+    /**
+     * Atualiza o tamanho da imagem guia
+     */
+    function atualizarTamanho() {
+        elementos.guia.css({
+            'width': `${config.tamanho}%`,
+            'height': 'auto'
+        });
+        elementos.tamanhoValor.text(`${config.tamanho}%`);
+        elementos.tamanhoSlider.val(config.tamanho);
+        salvarConfiguracao();
+    }
+
+    /**
+     * Atualiza a posição da imagem guia
+     */
+    function atualizarPosicao() {
         const canvas = document.querySelector('canvas');
-        if (!canvas) return;
-        
+        if (!canvas || !config.urlImagem) return;
+
         const rect = canvas.getBoundingClientRect();
-        const centerX = rect.width / 2 - (referenceImage.width / 2) + config.offset.x;
-        const centerY = rect.height / 2 - (referenceImage.height / 2) + config.offset.y;
-        
-        overlay.css({
-            left: `${rect.left + centerX}px`,
-            top: `${rect.top + centerY}px`,
-            width: `${referenceImage.width}px`,
-            height: `${referenceImage.height}px`
+        elementos.guia.css({
+            left: `${rect.left + config.deslocamento.x}px`,
+            top: `${rect.top + config.deslocamento.y}px`
         });
-    };
+    }
 
-    // AJUSTA POSIÇÃO MANUALMENTE
-    const adjustPosition = (axis, direction) => {
-        config.offset[axis] += (direction * config.pixelSize);
+    /**
+     * Alterna entre minimizar e maximizar a janela
+     */
+    function toggleMinimizar() {
+        config.janelaMinimizada = !config.janelaMinimizada;
+        elementos.minimizarBtn.text(config.janelaMinimizada ? '⬛' : '➖');
+        elementos.controles.toggleClass('minimizado', config.janelaMinimizada);
+
+        ajustarPosicaoJanela(elementos.controles[0]);
+        salvarConfiguracao();
+    }
+
+    /**
+     * Salva a configuração atual
+     */
+    function salvarConfiguracao() {
         GM_setValue('wplaceConfig', config);
-        updateOverlayPosition();
-        
-        $(`.control-group div:contains("Posição atual")`)
-            .html(`Posição atual: X ${config.offset.x}px | Y ${config.offset.y}px`);
-    };
+    }
 
-    // INICIALIZAÇÃO
-    const init = () => {
-        createUI();
-        loadReferenceImage();
-        
-        // Event Listeners
-        $('#wplace-minimize-btn').click(toggleMinimize);
-        $('#wplace-close-btn').click(closeWindow);
-        
-        $('#wplace-opacity').on('input', function() {
-            config.referenceOpacity = parseInt($(this).val()) / 100;
-            overlay.css('opacity', config.referenceOpacity);
-            GM_setValue('wplaceConfig', config);
+    /**
+     * Configura os event listeners
+     */
+    function setupEventListeners() {
+        // Carregar imagem
+        elementos.carregarBtn.on('click', () => {
+            const url = elementos.urlInput.val().trim();
+            if (url) carregarImagem(url);
         });
-        
-        $('#wplace-pixel-size').change(function() {
-            config.pixelSize = parseInt($(this).val());
-            GM_setValue('wplaceConfig', config);
+
+        // Controle de opacidade
+        elementos.opacidade.on('input', () => {
+            config.opacidade = parseFloat(elementos.opacidade.val());
+            elementos.guia.css('opacity', config.opacidade);
+            elementos.opacidade.prev('label').text(`Opacidade: ${config.opacidade.toFixed(1)}`);
+            salvarConfiguracao();
         });
-        
-        $('.pos-adjust').click(function() {
-            const axis = $(this).data('axis');
-            const dir = $(this).data('dir');
-            adjustPosition(axis, dir);
+
+        // Controles de tamanho
+        elementos.diminuirBtn.on('click', () => {
+            config.tamanho = Math.max(config.tamanho - DIMENSOES.TAMANHO.STEP, DIMENSOES.TAMANHO.MIN);
+            atualizarTamanho();
         });
-        
-        // Teclas de atalho para ajuste de posição
-        $(document).keydown(function(e) {
-            if (e.ctrlKey && e.shiftKey) {
+
+        elementos.aumentarBtn.on('click', () => {
+            config.tamanho = Math.min(config.tamanho + DIMENSOES.TAMANHO.STEP, DIMENSOES.TAMANHO.MAX);
+            atualizarTamanho();
+        });
+
+        elementos.tamanhoSlider.on('input', () => {
+            config.tamanho = parseInt(elementos.tamanhoSlider.val());
+            atualizarTamanho();
+        });
+
+        // Botão de minimizar/maximizar
+        elementos.minimizarBtn.on('click', toggleMinimizar);
+
+        // Atalhos de teclado
+        $(document).on('keydown', (e) => {
+            const passo = e.shiftKey ? DIMENSOES.TAMANHO.STEP * 2 : DIMENSOES.TAMANHO.STEP;
+            let atualizar = false;
+
+            // Movimento (Ctrl + setas)
+            if (e.ctrlKey && !e.altKey && !e.metaKey) {
                 if (e.key === 'ArrowUp') {
-                    adjustPosition('y', -1);
-                    e.preventDefault();
+                    config.deslocamento.y -= passo;
+                    atualizar = true;
                 } else if (e.key === 'ArrowDown') {
-                    adjustPosition('y', 1);
-                    e.preventDefault();
+                    config.deslocamento.y += passo;
+                    atualizar = true;
                 } else if (e.key === 'ArrowLeft') {
-                    adjustPosition('x', -1);
-                    e.preventDefault();
+                    config.deslocamento.x -= passo;
+                    atualizar = true;
                 } else if (e.key === 'ArrowRight') {
-                    adjustPosition('x', 1);
-                    e.preventDefault();
+                    config.deslocamento.x += passo;
+                    atualizar = true;
                 }
             }
-        });
-        
-        // Atualiza posição quando o canvas é redimensionado
-        const observer = new MutationObserver(updateOverlayPosition);
-        observer.observe(document.body, { childList: true, subtree: true });
-    };
-
-    // INICIA O SCRIPT
-    $(document).ready(function() {
-        // Espera o canvas carregar
-        const checkCanvas = setInterval(function() {
-            if (document.querySelector('canvas')) {
-                clearInterval(checkCanvas);
-                init();
+            // Tamanho (Alt + setas)
+            else if (e.altKey && !e.ctrlKey && !e.metaKey) {
+                if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                    config.tamanho = Math.min(config.tamanho + passo, DIMENSOES.TAMANHO.MAX);
+                    atualizar = true;
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                    config.tamanho = Math.max(config.tamanho - passo, DIMENSOES.TAMANHO.MIN);
+                    atualizar = true;
+                }
             }
-        }, 500);
-    });
+            // Opacidade (Ctrl + Alt + setas para cima/baixo)
+            else if ((e.ctrlKey && e.altKey) || (e.metaKey && e.altKey)) {
+                if (e.key === 'ArrowUp') {
+                    config.opacidade = Math.min(config.opacidade + DIMENSOES.OPACIDADE.STEP, DIMENSOES.OPACIDADE.MAX);
+                    atualizar = true;
+                } else if (e.key === 'ArrowDown') {
+                    config.opacidade = Math.max(config.opacidade - DIMENSOES.OPACIDADE.STEP, DIMENSOES.OPACIDADE.MIN);
+                    atualizar = true;
+                }
+            }
+
+            if (atualizar) {
+                if (e.altKey && !e.ctrlKey) {
+                    atualizarTamanho();
+                } else if ((e.ctrlKey && e.altKey) || (e.metaKey && e.altKey)) {
+                    elementos.guia.css('opacity', config.opacidade);
+                    elementos.opacidade.val(config.opacidade);
+                    elementos.opacidade.prev('label').text(`Opacidade: ${config.opacidade.toFixed(1)}`);
+                } else {
+                    atualizarPosicao();
+                }
+                salvarConfiguracao();
+                e.preventDefault();
+            }
+        });
+
+        // Redimensionamento da janela
+        const debouncedResize = debounce(() => {
+            ajustarPosicaoJanela(elementos.controles[0]);
+            atualizarPosicao();
+        }, 100);
+
+        $(window).on('resize', debouncedResize);
+    }
+
+    /**
+     * Debounce para eventos frequentes
+     * @param {Function} fn - Função a ser executada
+     * @param {number} delay - Tempo de espera em ms
+     * @returns {Function} Função debounced
+     */
+    function debounce(fn, delay) {
+        let timer;
+        return function() {
+            clearTimeout(timer);
+            timer = setTimeout(fn, delay);
+        };
+    }
+
+    // =============================================
+    // INICIALIZAÇÃO
+    // =============================================
+    function init() {
+        // Carrega configurações salvas
+        const savedConfig = GM_getValue('wplaceConfig');
+        if (savedConfig) Object.assign(config, savedConfig);
+
+        // Cria a interface
+        criarInterface();
+
+        // Configura a posição inicial
+        ajustarPosicaoJanela(elementos.controles[0]);
+
+        // Torna a janela arrastável
+        makeDraggable(elementos.controles[0]);
+
+        // Configura os event listeners
+        setupEventListeners();
+
+        // Carrega a imagem se já existir uma URL configurada
+        if (config.urlImagem) carregarImagem(config.urlImagem);
+    }
+
+    // Inicia o script quando o DOM estiver pronto
+    $(document).ready(init);
 })();
